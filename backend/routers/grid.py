@@ -56,7 +56,6 @@ async def generate_micro_grids(req: GridRequest):
     
     # Reproject back to WGS84
     intersecting_grid = intersecting_grid.to_crs(epsg=4326)
-    
     return {
         "message": f"Successfully generated {len(intersecting_grid)} micro-grid cells of {cell_size}m.",
         "cell_count": len(intersecting_grid),
