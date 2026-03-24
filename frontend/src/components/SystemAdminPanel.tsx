@@ -7,7 +7,7 @@ import {
     ShieldAlert, CheckCircle2, AlertTriangle, XCircle,
     RefreshCw, Lock, Server, Cpu, Clock, Wifi, WifiOff,
     Filter, ChevronRight, BarChart3, Info, Save, RotateCcw,
-    LayersIcon, MapPin, Zap, Eye
+    LayersIcon, MapPin, Zap, Eye, Mail
 } from 'lucide-react';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -40,6 +40,7 @@ const TABS = [
     { id: 'health', label: 'Sys. Health', icon: Activity },
     { id: 'audit', label: 'Audit Log', icon: FileText },
     { id: 'multicity', label: 'Multi-City', icon: Globe },
+    { id: 'permissions', label: 'Invitations', icon: ShieldAlert },
 ];
 
 // ─── 1. Model Sensitivity ─────────────────────────────────────────────────────
@@ -494,6 +495,152 @@ function MultiCityTab() {
     );
 }
 
+// ─── 6. Permissions / User Invites ──────────────────────────────────────────
+function PermissionsTab() {
+    const [email, setEmail] = useState('');
+    const [users, setUsers] = useState<any[]>([]);
+    const [loading, setLoading] = useState(false);
+    const [fetching, setFetching] = useState(true);
+    const [message, setMessage] = useState('');
+
+    const fetchUsers = async () => {
+        setFetching(true);
+        try {
+            const res = await fetch('/api/clerk/users');
+            if (res.ok) {
+                const data = await res.json();
+                setUsers(data);
+            }
+        } catch (err) {
+            console.error('Failed to fetch users');
+        }
+        setFetching(false);
+    };
+
+    useEffect(() => {
+        fetchUsers();
+    }, []);
+
+    const handleInvite = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setLoading(true);
+        setMessage('');
+        try {
+            const res = await fetch('/api/clerk/invite', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, role: 'City Admin' })
+            });
+            const data = await res.json();
+            if (data.success) {
+                setMessage(`Success! Invitation sent to ${email} as City Admin.`);
+                setEmail('');
+            } else {
+                setMessage(`Error: ${data.error || 'Failed to send'}`);
+            }
+        } catch (err) {
+            setMessage('Error: Network failure or unauthorized.');
+        }
+        setLoading(false);
+    };
+
+    const handlePromote = async (userId: string, userEmail: string) => {
+        if (!confirm(`Are you sure you want to promote ${userEmail} to City Admin?`)) return;
+        setLoading(true);
+        try {
+            const res = await fetch('/api/clerk/users', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userId, role: 'City Admin' })
+            });
+            if (res.ok) {
+                setMessage(`Successfully promoted ${userEmail} to City Admin.`);
+                fetchUsers();
+            } else {
+                setMessage('Failed to promote user.');
+            }
+        } catch (err) {
+            setMessage('Error: Network failure.');
+        }
+        setLoading(false);
+    };
+
+    return (
+        <div className="space-y-6">
+            {/* Invitation Section */}
+            <div className="p-4 rounded-xl bg-blue-500/5 border border-blue-500/20">
+                <div className="flex items-center gap-2 mb-2">
+                    <ShieldAlert className="w-5 h-5 text-blue-400" />
+                    <h4 className="text-sm font-bold text-white uppercase tracking-wider">Invite New City Admin</h4>
+                </div>
+                <form onSubmit={handleInvite} className="flex gap-2">
+                    <div className="relative flex-1">
+                        <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                        <input
+                            type="email"
+                            value={email}
+                            onChange={e => setEmail(e.target.value)}
+                            placeholder="admin@cityhall.gov.in"
+                            required
+                            className="w-full bg-slate-900 border border-white/10 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500/50"
+                        />
+                    </div>
+                    <button
+                        type="submit"
+                        disabled={loading}
+                        className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold px-6 rounded-xl transition-all shadow-lg shadow-blue-600/20 text-xs"
+                    >
+                        Invite
+                    </button>
+                </form>
+            </div>
+
+            {/* Promotion Section */}
+            <div>
+                <div className="flex items-center justify-between mb-4">
+                    <h4 className="text-[10px] font-bold text-white uppercase tracking-widest">Registered Citizens</h4>
+                    <button onClick={fetchUsers} className="text-blue-400 hover:text-blue-300">
+                        <RefreshCw className={`w-3.5 h-3.5 ${fetching ? 'animate-spin' : ''}`} />
+                    </button>
+                </div>
+
+                <div className="space-y-2 max-h-[250px] overflow-y-auto custom-scrollbar pr-1">
+                    {fetching ? (
+                        <div className="text-center py-8 text-slate-500 text-[10px] uppercase tracking-widest animate-pulse">Syncing...</div>
+                    ) : users.filter(u => u.role === 'Citizen').length === 0 ? (
+                        <div className="text-center py-8 text-slate-600 text-[10px] uppercase border border-dashed border-white/5 rounded-xl">No Citizens found</div>
+                    ) : (
+                        users.filter(u => u.role === 'Citizen').map(u => (
+                            <div key={u.id} className="flex items-center justify-between p-3 rounded-xl bg-white/[0.02] border border-white/5">
+                                <div className="flex flex-col">
+                                    <span className="text-xs text-white">{u.email}</span>
+                                    <span className="text-[8px] text-slate-500 uppercase tracking-widest">{u.id}</span>
+                                </div>
+                                <button
+                                    onClick={() => handlePromote(u.id, u.email)}
+                                    disabled={loading}
+                                    className="bg-emerald-500/10 hover:bg-emerald-500 text-emerald-400 hover:text-white px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all"
+                                >
+                                    Promote to City Admin
+                                </button>
+                            </div>
+                        ))
+                    )}
+                </div>
+            </div>
+
+            {message && (
+                <motion.div
+                    initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                    className={`p-3 rounded-lg text-[10px] font-bold border ${message.includes('Error') || message.includes('Failed') ? 'bg-red-500/10 border-red-500/30 text-red-400' : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'}`}
+                >
+                    {message}
+                </motion.div>
+            )}
+        </div>
+    );
+}
+
 // ─── Main Panel ────────────────────────────────────────────────────────────────
 export default function SystemAdminPanel({
     floodRiskScore, rainfall, budget, pumps, drainage, cityReadiness, auditLog, onClose
@@ -563,6 +710,7 @@ export default function SystemAdminPanel({
                                 {activeTab === 'health' && <SystemHealthTab floodRiskScore={floodRiskScore} rainfall={rainfall} />}
                                 {activeTab === 'audit' && <AuditTab auditLog={auditLog} />}
                                 {activeTab === 'multicity' && <MultiCityTab />}
+                                {activeTab === 'permissions' && <PermissionsTab />}
                             </motion.div>
                         </AnimatePresence>
                     </div>
@@ -582,3 +730,4 @@ export default function SystemAdminPanel({
         </AnimatePresence>
     );
 }
+

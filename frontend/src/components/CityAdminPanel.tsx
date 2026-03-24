@@ -1,12 +1,12 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     X, BarChart3, SlidersHorizontal, ShieldAlert, TrendingUp, Activity,
     ArrowUp, ArrowDown, Minus, Users, Zap, CloudRain, Database,
     IndianRupee, Building2, AlertTriangle, CheckCircle2, ChevronRight,
-    LayoutGrid, Wallet, Wrench, AreaChart, Radio, Info
+    LayoutGrid, Wallet, Wrench, AreaChart, Radio, Info, Mail, RefreshCw, ShieldAlert as ShieldIcon
 } from 'lucide-react';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -52,6 +52,7 @@ const TABS = [
     { id: 'mitigation', label: 'Mitigation', icon: ShieldAlert },
     { id: 'economic', label: 'Economic', icon: IndianRupee },
     { id: 'trend', label: 'Risk Trend', icon: AreaChart },
+    { id: 'personnel', label: 'Personnel', icon: Users },
 ];
 
 // ─── Sub-panel components ──────────────────────────────────────────────────────
@@ -478,6 +479,140 @@ function RiskTrendTab({ rainfall, floodRiskScore, dynamicWards }: {
     );
 }
 
+// 6. PERSONNEL / WARD OFFICER PROMOTION
+function PersonnelTab() {
+    const [email, setEmail] = useState('');
+    const [users, setUsers] = useState<any[]>([]);
+    const [loading, setLoading] = useState(false);
+    const [fetching, setFetching] = useState(true);
+    const [message, setMessage] = useState('');
+
+    const fetchUsers = async () => {
+        setFetching(true);
+        try {
+            const res = await fetch('/api/clerk/users');
+            if (res.ok) {
+                const data = await res.json();
+                setUsers(data);
+            }
+        } catch (err) {
+            console.error('Failed to fetch users');
+        }
+        setFetching(false);
+    };
+
+    useEffect(() => {
+        fetchUsers();
+    }, []);
+
+    const handleInvite = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setLoading(true);
+        setMessage('');
+        try {
+            const res = await fetch('/api/clerk/invite', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, role: 'Ward Officer' })
+            });
+            const data = await res.json();
+            if (data.success) {
+                setMessage(`Success! Invitation sent to ${email} as Ward Officer.`);
+                setEmail('');
+            } else {
+                setMessage(`Error: ${data.error || 'Failed to send'}`);
+            }
+        } catch (err) {
+            setMessage('Error: Network failure or unauthorized.');
+        }
+        setLoading(false);
+    };
+
+    const handlePromote = async (userId: string, userEmail: string) => {
+        if (!confirm(`Are you sure you want to promote ${userEmail} to Ward Officer?`)) return;
+        setLoading(true);
+        try {
+            const res = await fetch('/api/clerk/users', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userId, role: 'Ward Officer' })
+            });
+            if (res.ok) {
+                setMessage(`Successfully promoted ${userEmail} to Ward Officer.`);
+                fetchUsers();
+            } else {
+                setMessage('Failed to promote user.');
+            }
+        } catch (err) {
+            setMessage('Error: Network failure.');
+        }
+        setLoading(false);
+    };
+
+    return (
+        <div className="space-y-6">
+            <div className="p-4 rounded-xl bg-blue-500/5 border border-blue-500/20">
+                <div className="flex items-center gap-2 mb-2">
+                    <ShieldIcon className="w-5 h-5 text-blue-400" />
+                    <h4 className="text-sm font-bold text-white uppercase tracking-wider">Invite Ward Officer</h4>
+                </div>
+                <form onSubmit={handleInvite} className="flex gap-2">
+                    <div className="relative flex-1">
+                        <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                        <input
+                            type="email"
+                            value={email}
+                            onChange={e => setEmail(e.target.value)}
+                            placeholder="officer@ward.gov.in"
+                            required
+                            className="w-full bg-slate-900 border border-white/10 rounded-xl pl-10 pr-4 py-2 text-sm text-white focus:outline-none focus:border-blue-500/50"
+                        />
+                    </div>
+                    <button type="submit" disabled={loading} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold px-4 rounded-xl text-xs transition-all">
+                        Invite
+                    </button>
+                </form>
+            </div>
+
+            <div>
+                <div className="flex items-center justify-between mb-4">
+                    <h4 className="text-[10px] font-bold text-white uppercase tracking-widest">Eligible Citizens</h4>
+                    <button onClick={fetchUsers} className="text-blue-400 hover:text-blue-300">
+                        <RefreshCw className={`w-3 h-3 ${fetching ? 'animate-spin' : ''}`} />
+                    </button>
+                </div>
+
+                <div className="space-y-2 max-h-[250px] overflow-y-auto pr-1">
+                    {fetching ? (
+                        <div className="text-center py-6 text-slate-500 text-[10px] uppercase animate-pulse">Scanning Registry...</div>
+                    ) : users.filter(u => u.role === 'Citizen').length === 0 ? (
+                        <div className="text-center py-6 text-slate-600 text-[10px] uppercase border border-dashed border-white/5 rounded-xl">No Citizens found</div>
+                    ) : (
+                        users.filter(u => u.role === 'Citizen').map(u => (
+                            <div key={u.id} className="flex items-center justify-between p-3 rounded-xl bg-white/[0.02] border border-white/5">
+                                <span className="text-xs text-slate-300">{u.email}</span>
+                                <button
+                                    onClick={() => handlePromote(u.id, u.email)}
+                                    disabled={loading}
+                                    className="bg-emerald-500/10 hover:bg-emerald-500 text-emerald-400 hover:text-white px-3 py-1 rounded-lg text-[9px] font-bold uppercase transition-all"
+                                >
+                                    Promote
+                                </button>
+                            </div>
+                        ))
+                    )}
+                </div>
+            </div>
+
+            {message && (
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className={`p-3 rounded-lg text-[10px] font-bold ${message.includes('Error') || message.includes('Failed') ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'}`}>
+                    {message}
+                </motion.div>
+            )}
+        </div>
+    );
+}
+
 // ─── Main Panel ────────────────────────────────────────────────────────────────
 export default function CityAdminPanel({
     dynamicWards, floodRiskScore, cityReadiness, rainfall, budget, pumps, drainage,
@@ -562,6 +697,7 @@ export default function CityAdminPanel({
                                 {activeTab === 'trend' && (
                                     <RiskTrendTab rainfall={rainfall} floodRiskScore={floodRiskScore} dynamicWards={dynamicWards} />
                                 )}
+                                {activeTab === 'personnel' && <PersonnelTab />}
                             </motion.div>
                         </AnimatePresence>
                     </div>
@@ -581,3 +717,4 @@ export default function CityAdminPanel({
         </AnimatePresence>
     );
 }
+

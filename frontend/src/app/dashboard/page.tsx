@@ -15,13 +15,20 @@ import MitigationEngine from '@/components/MitigationEngine';
 import CityAdminPanel from '@/components/CityAdminPanel';
 import SystemAdminPanel from '@/components/SystemAdminPanel';
 import WardOfficerDashboard from '@/components/WardOfficerDashboard';
-import { Layers, CloudRain, ShieldAlert, Activity, Users, MapPin, Database, ChevronLeft, Droplets, Zap, ChevronRight, SlidersHorizontal, Radar, ListOrdered, X, LayoutGrid, Lock } from 'lucide-react';
+import { Layers, CloudRain, ShieldAlert, Activity, Users, MapPin, Database, ChevronLeft, Droplets, Zap, ChevronRight, SlidersHorizontal, Radar, ListOrdered, X, LayoutGrid, Lock, XCircle } from 'lucide-react';
 import Link from 'next/link';
 import { ReactCompareSlider } from 'react-compare-slider';
+import { useUser, SignOutButton, SignInButton } from '@clerk/nextjs';
 
 export default function DashboardPage() {
-    // 4-Tier RBAC State (Null = Not Logged In)
-    const [authState, setAuthState] = useState<{ role: string, ward_id: string | null } | null>(null);
+    const { user, isLoaded, isSignedIn } = useUser();
+    
+    // Extracted Role & Ward from Clerk Metadata
+    const role = (user?.publicMetadata?.role as string) || 'Citizen';
+    const ward_id = (user?.publicMetadata?.ward_id as string) || null;
+
+    // 4-Tier RBAC State (Compatible with existing components)
+    const authState = user ? { role, ward_id } : null;
     const [isLoggingIn, setIsLoggingIn] = useState(false);
 
     const [activeScenario, setActiveScenario] = useState('none');
@@ -152,16 +159,72 @@ export default function DashboardPage() {
     const totalMicroGrids = dynamicWards.reduce((acc, ward) => acc + Math.round(2412 * (1 + ward.risk * 0.2)), 0);
     const totalIdentifiedHotspots = dynamicWards.reduce((acc, ward) => acc + Math.round(ward.risk * 150), 0);
 
-    const handleLogin = (role: string, specificWard: string | null = null) => {
+    const updateRole = async (newRole: string, newWard: string | null = null) => {
         setIsLoggingIn(true);
-        setTimeout(() => {
-            // Mocking the JWT Decryption extraction phase
-            setAuthState({ role: role, ward_id: specificWard });
+        try {
+            const res = await fetch('/api/clerk/set-role', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ role: newRole, ward_id: newWard }),
+            });
+            if (res.ok) {
+                window.location.reload(); // Refresh to get new metadata
+            }
+        } catch (err) {
+            console.error(err);
+        } finally {
             setIsLoggingIn(false);
-        }, 1500);
+        }
     };
 
-    if (!authState) {
+    if (!isLoaded) return <div className="h-screen w-screen bg-[#020617] text-slate-100 flex flex-col items-center justify-center font-mono space-y-4">
+        <div className="w-12 h-12 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
+        <p className="text-sm tracking-widest text-blue-400 animate-pulse uppercase">Initializing Security Layers...</p>
+    </div>;
+
+    // Handle Access Denied based on Intended Role vs Account Role
+    const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+    const intendedRole = searchParams?.get('intended_role');
+    const userRole = (user?.publicMetadata?.role as string);
+
+    // If signed in but role doesn't match intended role (for new users especially)
+    if (isSignedIn && intendedRole && !userRole && intendedRole !== 'Citizen') {
+        return (
+            <main className="relative w-full h-screen overflow-hidden bg-[#020617] text-slate-100 flex items-center justify-center font-sans">
+                <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="z-10 bg-slate-900 border border-red-500/30 p-12 rounded-3xl shadow-[0_0_80px_rgba(239,68,68,0.2)] w-full max-w-lg text-center">
+                    <XCircle className="w-16 h-16 text-red-500 mx-auto mb-6" />
+                    <h1 className="text-2xl font-bold text-white mb-2 uppercase tracking-tighter">Access Denied</h1>
+                    <p className="text-slate-400 mb-8 leading-relaxed">
+                        The role <span className="text-red-400 font-bold">{intendedRole}</span> requires a secure invitation. 
+                        Your current account does not have sufficient clearance. Please contact a higher authority for an invitation link or register as a Citizen.
+                    </p>
+                    <div className="flex flex-col gap-3">
+                        <Link href="/dashboard" className="bg-red-600 hover:bg-red-500 text-white font-bold py-3 rounded-xl transition-all">
+                            Try Another Role
+                        </Link>
+                        <SignOutButton>
+                            <button className="text-slate-500 hover:text-white text-xs uppercase font-bold tracking-widest transition-colors py-2">
+                                Terminate Current Session
+                            </button>
+                        </SignOutButton>
+                    </div>
+                </motion.div>
+            </main>
+        );
+    }
+
+    // Auto-assign Citizen if they signed up via Citizen button
+    if (isSignedIn && intendedRole === 'Citizen' && !userRole) {
+        if (!isLoggingIn) updateRole('Citizen');
+        return (
+            <div className="h-screen w-screen bg-[#020617] flex flex-col items-center justify-center space-y-6">
+                <div className="w-16 h-16 border-t-4 border-emerald-500 rounded-full animate-spin"></div>
+                <p className="text-emerald-400 font-bold tracking-widest uppercase animate-pulse">Provisioning Citizen Credentials...</p>
+            </div>
+        );
+    }
+
+    if (!isSignedIn || !userRole || !authState) {
         return (
             <main className="relative w-full h-screen overflow-hidden bg-[#020617] text-slate-100 flex items-center justify-center font-sans">
                 <div className="absolute inset-0 z-0 bg-blue-900/10 mix-blend-screen overflow-hidden">
@@ -190,21 +253,24 @@ export default function DashboardPage() {
                         ].map((r, i) => {
                             const Icon = r.icon;
                             return (
-                                <button
-                                    key={i}
-                                    onClick={() => handleLogin(r.role, r.access)}
-                                    disabled={isLoggingIn}
-                                    className={`w-full group relative overflow-hidden flex items-center p-4 rounded-xl border border-${r.color}-500/30 bg-slate-800/50 hover:bg-${r.color}-500/10 transition-all text-left duration-300 disabled:opacity-50`}
+                                <SignInButton 
+                                    key={i} 
+                                    mode="modal" 
+                                    fallbackRedirectUrl={`/dashboard?intended_role=${encodeURIComponent(r.role)}`}
                                 >
-                                    <div className={`p-3 rounded-lg bg-${r.color}-500/10 mr-4 group-hover:scale-110 transition-transform`}>
-                                        <Icon className={`w-6 h-6 text-${r.color}-400`} />
-                                    </div>
-                                    <div>
-                                        <h3 className={`text-lg font-bold text-white group-hover:text-${r.color}-300 transition-colors`}>{r.role}</h3>
-                                        <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">{r.desc}</p>
-                                    </div>
-                                    <ChevronRight className={`absolute right-6 w-5 h-5 text-${r.color}-500/50 group-hover:text-${r.color}-400 group-hover:translate-x-1 transition-all`} />
-                                </button>
+                                    <button
+                                        className={`w-full group relative overflow-hidden flex items-center p-4 rounded-xl border border-${r.color}-500/30 bg-slate-800/50 hover:bg-${r.color}-500/10 transition-all text-left duration-300`}
+                                    >
+                                        <div className={`p-3 rounded-lg bg-${r.color}-500/10 mr-4 group-hover:scale-110 transition-transform`}>
+                                            <Icon className={`w-6 h-6 text-${r.color}-400`} />
+                                        </div>
+                                        <div>
+                                            <h3 className={`text-lg font-bold text-white group-hover:text-${r.color}-300 transition-colors`}>{r.role}</h3>
+                                            <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">{r.desc}</p>
+                                        </div>
+                                        <ChevronRight className={`absolute right-6 w-5 h-5 text-${r.color}-500/50 group-hover:text-${r.color}-400 group-hover:translate-x-1 transition-all`} />
+                                    </button>
+                                </SignInButton>
                             );
                         })}
                     </div>
@@ -213,7 +279,7 @@ export default function DashboardPage() {
                 {isLoggingIn && (
                     <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-slate-900/90 backdrop-blur-md">
                         <div className="w-12 h-12 relative border-t-2 border-r-2 border-blue-500 rounded-full animate-spin mb-6"></div>
-                        <p className="text-sm font-bold tracking-[0.2em] text-blue-400 uppercase animate-pulse">Decrypting Role Assignment Bearer Token...</p>
+                        <p className="text-sm font-bold tracking-[0.2em] text-blue-400 uppercase animate-pulse">Assigning Role Metadata to Clerk Profile...</p>
                     </div>
                 )}
             </main>
@@ -222,12 +288,12 @@ export default function DashboardPage() {
 
     // Citizen gets dedicated full experience
     if (authState.role === 'Citizen') {
-        return <CitizenDashboard onLogout={() => setAuthState(null)} />;
+        return <CitizenDashboard onLogout={() => {}} />;
     }
 
     // Ward Officer gets dedicated 2D tactical dashboard (no 3D map)
     if (authState.role === 'Ward Officer') {
-        return <WardOfficerDashboard onLogout={() => setAuthState(null)} />;
+        return <WardOfficerDashboard onLogout={() => {}} />;
     }
 
     return (
@@ -328,13 +394,14 @@ export default function DashboardPage() {
                     </div>
 
                     {/* Logout Button */}
-                    <button
-                        onClick={() => setAuthState(null)}
-                        className="p-2 text-slate-400 hover:text-red-400 transition-colors bg-white/5 hover:bg-red-500/10 rounded-lg ml-2"
-                        title="End Secure Session"
-                    >
-                        <X className="w-4 h-4" />
-                    </button>
+                    <SignOutButton>
+                        <button
+                            className="p-2 text-slate-400 hover:text-red-400 transition-colors bg-white/5 hover:bg-red-500/10 rounded-lg ml-2"
+                            title="End Secure Session"
+                        >
+                            <X className="w-4 h-4" />
+                        </button>
+                    </SignOutButton>
                 </div>
             </header >
 
