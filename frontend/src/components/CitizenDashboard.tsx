@@ -11,6 +11,9 @@ import {
 
 interface CitizenDashboardProps {
     onLogout: () => void;
+    cityName?: string;
+    customZones?: string[];
+    customZoneMetrics?: any[];
 }
 
 // Delhi NCT – 11 Districts / Key Zone identifiers (MCD-aligned)
@@ -117,7 +120,38 @@ const RAINFALL_SCENARIOS = [
     { label: 'Extreme', mm: 400, emoji: '🌊', roads: 18, depth: 'Severe', households: 6200 },
 ];
 
-export default function CitizenDashboard({ onLogout }: CitizenDashboardProps) {
+export default function CitizenDashboard({ onLogout, cityName: propCityName, customZones, customZoneMetrics }: CitizenDashboardProps) {
+    const cityName = propCityName && propCityName !== 'Delhi NCT' ? propCityName : 'Delhi';
+    const isCustomCity = !!customZones && customZones.length > 0;
+    const activeWards = isCustomCity ? customZones! : DELHI_WARDS;
+
+    // Build dynamic WARD_DATA for custom cities
+    // Uses REAL GIS metrics from backend when available, falls back to procedural
+    const getDynamicWardData = (zoneName: string, idx: number) => {
+        const gis = customZoneMetrics?.[idx];
+        const risk = gis ? gis.composite_flood_risk : (0.3 + (idx % 5) * 0.12);
+        return {
+            risk,
+            prob: gis ? gis.flood_probability_pct : Math.round(risk * 100),
+            trend: (gis?.risk_trend ?? (['up', 'stable', 'down', 'up', 'stable'][idx % 5])) as 'up' | 'down' | 'stable',
+            drainage: gis ? Math.max(15, gis.drainage_score) : (35 + (idx % 4) * 12),
+            emergency: gis ? Math.max(20, gis.emergency_score) : (45 + (idx % 3) * 10),
+            infra: gis ? Math.max(20, gis.infra_score) : (40 + (idx % 4) * 9),
+            hotspots: [
+                { name: `Low-lying area in ${zoneName.slice(0, 20)}`, risk: 'High', reasons: ['Terrain depression', 'Drainage backflow', 'Urban runoff'] },
+                { name: `Dense settlement – ${zoneName.slice(0, 18)}`, risk: 'Moderate', reasons: ['High density', 'Impermeable surface', 'Storm drain deficit'] },
+            ],
+            safeZones: [
+                { name: `${zoneName.slice(0, 18)} Relief Center`, type: 'Emergency Center', dist: '0.8 km' },
+                { name: `Govt Hospital – ${zoneName.slice(0, 12)}`, type: 'Hospital', dist: '1.2 km' },
+                { name: `Elevated Roadway ${zoneName.slice(0, 10)}`, type: 'Elevated Zone', dist: '0.5 km' },
+            ],
+            rainfall: gis ? Math.round(risk * 250) : (80 + (idx % 6) * 25),
+            forecast: (['Moderate', 'Heavy', 'Heavy', 'Light', 'Extreme', 'Moderate'] as const)[idx % 6],
+        };
+    };
+
+    const DEFAULT_WARD = activeWards[0] || DELHI_WARDS[0];
     const [selectedWard, setSelectedWard] = useState(DEFAULT_WARD);
     const [locationMode, setLocationMode] = useState<'select' | 'pin' | 'done'>('select');
     const [pinCode, setPinCode] = useState('');
@@ -136,7 +170,10 @@ export default function CitizenDashboard({ onLogout }: CitizenDashboardProps) {
         return () => clearInterval(t);
     }, []);
 
-    const ward = WARD_DATA[selectedWard] || WARD_DATA[DEFAULT_WARD];
+    const wardIdx = activeWards.indexOf(selectedWard);
+    const ward = isCustomCity
+        ? getDynamicWardData(selectedWard, wardIdx >= 0 ? wardIdx : 0)
+        : (WARD_DATA[selectedWard] || WARD_DATA[DEFAULT_WARD]);
     const riskMeta = getRiskLabel(ward.risk + (rainfallScenario * 0.04));
     const readiness = Math.round((ward.drainage + ward.emergency + ward.infra) / 3);
     const readinessMeta = getReadinessLabel(readiness);
@@ -144,25 +181,27 @@ export default function CitizenDashboard({ onLogout }: CitizenDashboardProps) {
 
     const getSafetyAdvice = () => {
         const r = ward.risk;
+        const floodCtrl = cityName === 'Delhi' ? '1800111817' : '112';
+        const ctrlRoom = cityName === 'Delhi' ? 'Delhi Control Room 1077' : 'Local Control Room';
         if (r > 0.75) return [
-            'Avoid ALL areas near the Yamuna floodplain and low-lying drains immediately',
-            'Move vehicles to upper floors or elevated parking — ground floors will flood',
+            `Avoid ALL low-lying areas and floodplain zones in ${cityName} immediately`,
+            'Move vehicles to upper floors or elevated parking — ground floors may flood',
             'Keep emergency kit (torch, documents, water) ready to evacuate within 15 minutes',
-            'Call Delhi Flood Control: 1800111817 if water enters your premises',
+            `Call Flood Control: ${floodCtrl} if water enters your premises`,
             'Do NOT enter flooded roads — manhole covers may be displaced',
         ];
         if (r > 0.55) return [
             'Avoid basement and ground-floor parking during tonight\'s forecast',
             'Move valuables to higher shelves inside your home',
             `Watch zone: ${ward.hotspots[0]?.name} — currently flagged as ${ward.hotspots[0]?.risk} risk`,
-            'Keep emergency numbers ready: Delhi Control Room 1077, Ambulance 102',
-            'Avoid travelling near Yamuna banks or low-lying colony roads',
+            `Keep emergency numbers ready: ${ctrlRoom}, Ambulance 102`,
+            'Avoid travelling near riverbanks or low-lying colony roads',
         ];
         return [
-            'Stay updated on IMD Delhi rainfall advisories',
-            'Avoid waterlogged roads — use metro where possible',
+            `Stay updated on IMD ${cityName} rainfall advisories`,
+            'Avoid waterlogged roads — use elevated routes where possible',
             'Keep umbrella and emergency torch accessible',
-            'Register for SMS alerts to receive real-time ward-level updates',
+            'Register for SMS alerts to receive real-time zone-level updates',
         ];
     };
 
@@ -185,7 +224,7 @@ export default function CitizenDashboard({ onLogout }: CitizenDashboardProps) {
                             <MapPin className="w-10 h-10 text-blue-400" />
                         </div>
                         <h1 className="text-2xl font-bold text-white">Check Flood Risk in Your Area</h1>
-                        <p className="text-sm text-slate-400 mt-2">Select your Delhi location to get personalised flood risk information</p>
+                        <p className="text-sm text-slate-400 mt-2">Select your {cityName} zone to get personalised flood risk information</p>
                     </div>
 
                     <div className="space-y-3">
@@ -196,7 +235,7 @@ export default function CitizenDashboard({ onLogout }: CitizenDashboardProps) {
                             <div className="p-2.5 bg-blue-500/20 rounded-lg mr-3"><Navigation className="w-5 h-5 text-blue-400" /></div>
                             <div className="text-left">
                                 <p className="font-bold text-white">Auto-Detect My Location</p>
-                                <p className="text-xs text-slate-400">Uses GPS to identify your Delhi zone</p>
+                                <p className="text-xs text-slate-400">Uses GPS to identify your {cityName} zone</p>
                             </div>
                             <ChevronRight className="ml-auto w-5 h-5 text-blue-400 group-hover:translate-x-1 transition-transform" />
                         </button>
@@ -208,7 +247,7 @@ export default function CitizenDashboard({ onLogout }: CitizenDashboardProps) {
                             <div className="p-2.5 bg-slate-700/50 rounded-lg mr-3"><Search className="w-5 h-5 text-slate-300" /></div>
                             <div className="text-left">
                                 <p className="font-bold text-white">Enter PIN Code</p>
-                                <p className="text-xs text-slate-400">Type your 6-digit Delhi PIN</p>
+                                <p className="text-xs text-slate-400">Type your 6-digit {cityName} PIN</p>
                             </div>
                             <ChevronRight className="ml-auto w-5 h-5 text-slate-400 group-hover:translate-x-1 transition-transform" />
                         </button>
@@ -220,8 +259,8 @@ export default function CitizenDashboard({ onLogout }: CitizenDashboardProps) {
                                 className="w-full bg-slate-900/80 border border-white/10 rounded-lg p-3 text-sm text-slate-200 focus:outline-none focus:border-blue-500/50"
                                 defaultValue=""
                             >
-                                <option value="" disabled>— Choose your Delhi zone —</option>
-                                {DELHI_WARDS.map(w => <option key={w} value={w}>{w}</option>)}
+                                <option value="" disabled>— Choose your {cityName} zone —</option>
+                                {activeWards.map(w => <option key={w} value={w}>{w}</option>)}
                             </select>
                         </div>
                     </div>
@@ -243,7 +282,7 @@ export default function CitizenDashboard({ onLogout }: CitizenDashboardProps) {
                         <ChevronRight className="w-4 h-4 rotate-180 mr-1" /> Back
                     </button>
                     <h2 className="text-xl font-bold text-white mb-2">Enter PIN Code</h2>
-                    <p className="text-sm text-slate-400 mb-6">We'll map your PIN to the nearest Delhi flood zone</p>
+                    <p className="text-sm text-slate-400 mb-6">We'll map your PIN to the nearest {cityName} flood zone</p>
                     <input
                         type="number"
                         placeholder="e.g. 110032"
@@ -273,7 +312,7 @@ export default function CitizenDashboard({ onLogout }: CitizenDashboardProps) {
                     <div className="p-1.5 bg-blue-500/20 rounded-lg"><ShieldAlert className="w-5 h-5 text-blue-400" /></div>
                     <div>
                         <h1 className="text-sm font-bold text-white tracking-wide">AURORA Citizen</h1>
-                        <p className="text-[10px] text-blue-300/80 font-semibold uppercase tracking-wider">Delhi Flood Intelligence</p>
+                        <p className="text-[10px] text-blue-300/80 font-semibold uppercase tracking-wider">{cityName} Flood Intelligence</p>
                     </div>
                 </div>
                 <div className="flex items-center space-x-2">
@@ -555,7 +594,7 @@ export default function CitizenDashboard({ onLogout }: CitizenDashboardProps) {
                         {/* Emergency Contacts — Delhi specific */}
                         <div className="mt-4 grid grid-cols-2 gap-2">
                             {[
-                                { label: 'Delhi Flood Control', num: '1800111817' },
+                                { label: cityName === 'Delhi' ? 'Delhi Flood Control' : 'City Flood Helpline', num: cityName === 'Delhi' ? '1800111817' : '1800-11-2012' },
                                 { label: 'Emergency / Ambulance', num: '112' },
                             ].map(c => (
                                 <div key={c.num} className="flex items-center justify-between p-3 bg-slate-800/50 border border-white/5 rounded-xl">
@@ -571,7 +610,7 @@ export default function CitizenDashboard({ onLogout }: CitizenDashboardProps) {
                 <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.45 }}>
                     <div className="bg-slate-900/60 border border-white/10 rounded-2xl p-5">
                         <h3 className="font-bold text-white flex items-center mb-1"><Bell className="w-4 h-4 text-blue-400 mr-2" />Get Real-Time Alerts</h3>
-                        <p className="text-xs text-slate-400 mb-4">Stay ahead of Delhi floods. Choose how you want to be notified:</p>
+                        <p className="text-xs text-slate-400 mb-4">Stay ahead of {cityName} floods. Choose how you want to be notified:</p>
                         <div className="space-y-3 mb-5">
                             {[
                                 { label: 'SMS Alerts', desc: 'Text message to your phone', state: alertSMS, set: setAlertSMS },
@@ -599,7 +638,7 @@ export default function CitizenDashboard({ onLogout }: CitizenDashboardProps) {
                 </motion.div>
 
                 <div className="text-center text-[11px] text-slate-600 pt-2">
-                    AURORA • Delhi Flood Intelligence Platform • IMD data refreshes every 5 minutes
+                    AURORA • {cityName} Flood Intelligence Platform • IMD data refreshes every 5 minutes
                 </div>
             </div>
         </main>

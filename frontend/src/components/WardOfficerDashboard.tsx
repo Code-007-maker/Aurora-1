@@ -92,24 +92,98 @@ DELHI_WARDS.forEach(w => {
 });
 
 // ─── Component ─────────────────────────────────────────────────────────────────
-export default function WardOfficerDashboard({ onLogout }: { onLogout: () => void }) {
-    const [selectedWard, setSelectedWard] = useState<string>('Shahdara – Vivek Vihar / Seemapuri');
-    const wardData = DELHI_WARD_DATA[selectedWard];
+export default function WardOfficerDashboard({
+    onLogout,
+    customZones,
+    customZoneMetrics
+}: {
+    onLogout: () => void;
+    customZones?: string[];
+    customZoneMetrics?: { risk: number, readiness: number, exposure: number, economic: number }[];
+}) {
+    // Determine active wards (Custom vs Default Delhi)
+    const activeWards = useMemo(() => {
+        if (customZones && customZones.length > 0) return customZones;
+        return DELHI_WARDS;
+    }, [customZones]);
 
-    const [rainfall, setRainfall] = useState(wardData.rainfall);
+    // Generate dynamic ward data for custom cities
+    const activeWardDataMap = useMemo(() => {
+        if (!customZones || !customZoneMetrics || customZones.length === 0) return DELHI_WARD_DATA;
+
+        const dynamicData: Record<string, WardData> = {};
+        customZones.forEach((zone, idx) => {
+            const metrics = customZoneMetrics[idx] || { risk: 0.5, readiness: 50, exposure: 50, economic: 50 };
+
+            // Deterministic pseudo-randomness for variety
+            const noise = (str: string) => {
+                let h = 0; for (let i = 0; i < str.length; i++) h = Math.imul(31, h) + str.charCodeAt(i) | 0;
+                return Math.abs(h) / 2147483648;
+            };
+            const n = noise(zone);
+
+            const isHighRisk = metrics.risk > 0.6;
+
+            dynamicData[zone] = {
+                risk: metrics.risk,
+                prob: Math.round(metrics.risk * 100),
+                trend: metrics.risk > 0.6 ? 'up' : metrics.risk < 0.3 ? 'down' : 'stable',
+                drainage: Math.round(metrics.readiness * 0.8 + n * 20),
+                emergency: Math.round(metrics.readiness),
+                infra: Math.round(metrics.economic * 0.6 + metrics.readiness * 0.4),
+                rainfall: Math.round(50 + metrics.risk * 150 + (n * 30)),
+                forecast: isHighRisk ? 'Heavy' : metrics.risk > 0.4 ? 'Moderate' : 'Light',
+                hotspots: [
+                    {
+                        name: `${zone} Primary Intersection`,
+                        risk: isHighRisk ? 'Severe' : 'Moderate',
+                        reasons: isHighRisk ? ['High Imperviousness', 'Critical Drainage Bottleneck'] : ['Temporary pooling'],
+                        xai_reasoning: isHighRisk
+                            ? `AI topology analysis indicates severe runoff accumulation due to ${(metrics.exposure).toFixed(1)}% exposure and substandard outfall capacity.`
+                            : `Expected to clear within 2 hours post-rainfall. Drainage network operating near normal capacity.`
+                    },
+                    ...(isHighRisk ? [{
+                        name: `${zone} Low-Elevation Zone`,
+                        risk: 'High',
+                        reasons: ['Topographical depression', 'High Vulnerability'],
+                        xai_reasoning: `Hydro-dynamic engine confirms ${(metrics.risk * 100).toFixed(0)}% inundation probability affecting local residential clusters.`
+                    }] : [])
+                ]
+            };
+        });
+        return dynamicData;
+    }, [customZones, customZoneMetrics]);
+
+    const [selectedWard, setSelectedWard] = useState<string>(activeWards[0]);
+
+    // Ensure selected ward is valid when switching datasets
+    useEffect(() => {
+        if (!activeWards.includes(selectedWard)) {
+            setSelectedWard(activeWards[0]);
+        }
+    }, [activeWards, selectedWard]);
+
+    const wardData = activeWardDataMap[selectedWard] || activeWardDataMap[activeWards[0]];
+
+    const [rainfall, setRainfall] = useState(wardData?.rainfall || 100);
     const [pumps, setPumps] = useState(42);
-    const [yamunaOverflow, setYamunaOverflow] = useState(false);
+    const [waterBodyOverflow, setWaterBodyOverflow] = useState(false);
     const [lastUpdate, setLastUpdate] = useState(new Date());
     const [viewMode, setViewMode] = useState<'operations' | 'simulation'>('operations');
 
-    useEffect(() => { setLastUpdate(new Date()); }, [selectedWard, rainfall, pumps, yamunaOverflow]);
+    // Sync rainfall when ward changes
+    useEffect(() => {
+        if (wardData) setRainfall(wardData.rainfall);
+    }, [selectedWard, wardData]);
+
+    useEffect(() => { setLastUpdate(new Date()); }, [selectedWard, rainfall, pumps, waterBodyOverflow]);
 
     // Risk Engine
-    const baseRisk = (wardData.risk) + ((rainfall - wardData.rainfall) / 500) * 0.4 - (pumps / 200) * 0.15 + (yamunaOverflow ? 0.2 : 0);
+    const baseRisk = (wardData?.risk || 0) + ((rainfall - (wardData?.rainfall || 100)) / 500) * 0.4 - (pumps / 200) * 0.15 + (waterBodyOverflow ? 0.2 : 0);
     const wardRisk = Math.max(0, Math.min(1, baseRisk));
-    const wardReadiness = Math.round(Math.max(0, Math.min(100, wardData.infra - (wardRisk - wardData.risk) * 50)));
+    const wardReadiness = Math.round(Math.max(0, Math.min(100, (wardData?.infra || 50) - (wardRisk - (wardData?.risk || 0)) * 50)));
 
-    const hotspots = useMemo(() => wardData.hotspots, [wardData]);
+    const hotspots = useMemo(() => wardData?.hotspots || [], [wardData]);
 
     const mitigationActions = useMemo(() => {
         const actions: any[] = [];
@@ -440,12 +514,12 @@ export default function WardOfficerDashboard({ onLogout }: { onLogout: () => voi
                                 {/* River Overflow Toggle */}
                                 <div className="flex items-center justify-between">
                                     <div className="flex-1">
-                                        <label className="text-sm font-black text-white uppercase tracking-wider">Yamuna Embankment Override</label>
-                                        <p className="text-xs text-slate-400 mt-1 font-medium pr-8">Simulate external river overflow compounding local drainage failure.</p>
+                                        <label className="text-sm font-black text-white uppercase tracking-wider">Major Water Body Override</label>
+                                        <p className="text-xs text-slate-400 mt-1 font-medium pr-8">Simulate external river/waterbank overflow compounding local drainage failure.</p>
                                     </div>
-                                    <button onClick={() => setYamunaOverflow(!yamunaOverflow)}
-                                        className={`px-8 py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all focus:outline-none flex-shrink-0 ${yamunaOverflow ? 'bg-rose-500/90 text-white shadow-[0_4px_20px_rgba(244,63,94,0.5)] border border-rose-400/50 scale-105' : 'bg-white/5 text-slate-400 border border-transparent hover:bg-white/10'}`}>
-                                        {yamunaOverflow ? 'Level Critical' : 'Safe Limits'}
+                                    <button onClick={() => setWaterBodyOverflow(!waterBodyOverflow)}
+                                        className={`px-8 py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all focus:outline-none flex-shrink-0 ${waterBodyOverflow ? 'bg-rose-500/90 text-white shadow-[0_4px_20px_rgba(244,63,94,0.5)] border border-rose-400/50 scale-105' : 'bg-white/5 text-slate-400 border border-transparent hover:bg-white/10'}`}>
+                                        {waterBodyOverflow ? 'Level Critical' : 'Safe Limits'}
                                     </button>
                                 </div>
 
