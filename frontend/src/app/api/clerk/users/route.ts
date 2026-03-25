@@ -14,6 +14,7 @@ export async function GET() {
         
         return NextResponse.json(mappedUsers);
     } catch (e: any) {
+        console.error('GET /api/clerk/users error:', e);
         return NextResponse.json({ error: 'Failed to fetch users' }, { status: 500 });
     }
 }
@@ -29,6 +30,7 @@ export async function POST(req: Request) {
 
         return NextResponse.json({ success: true });
     } catch (e: any) {
+        console.error('POST /api/clerk/users error:', e);
         return NextResponse.json({ error: 'Failed to update user role' }, { status: 500 });
     }
 }

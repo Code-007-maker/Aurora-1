@@ -1,12 +1,12 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     X, BarChart3, SlidersHorizontal, ShieldAlert, TrendingUp, Activity,
     ArrowUp, ArrowDown, Minus, Users, Zap, CloudRain, Database,
     IndianRupee, Building2, AlertTriangle, CheckCircle2, ChevronRight,
-    LayoutGrid, Wallet, Wrench, AreaChart, Radio, Info
+    LayoutGrid, Wallet, Wrench, AreaChart, Radio, Info, Mail, RefreshCw
 } from 'lucide-react';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -53,6 +53,7 @@ const TABS = [
     { id: 'mitigation', label: 'Mitigation', icon: ShieldAlert },
     { id: 'economic', label: 'Economic', icon: IndianRupee },
     { id: 'trend', label: 'Risk Trend', icon: AreaChart },
+    { id: 'personnel', label: 'Personnel', icon: Users },
 ];
 
 // ─── Sub-panel components ──────────────────────────────────────────────────────
@@ -563,6 +564,7 @@ export default function CityAdminPanel({
                                 {activeTab === 'trend' && (
                                     <RiskTrendTab rainfall={rainfall} floodRiskScore={floodRiskScore} dynamicWards={dynamicWards} />
                                 )}
+                                {activeTab === 'personnel' && <PersonnelTab />}
                             </motion.div>
                         </AnimatePresence>
                     </div>
@@ -580,5 +582,145 @@ export default function CityAdminPanel({
                 </motion.div>
             </motion.div>
         </AnimatePresence>
+    );
+}
+
+// 6. PERSONNEL / WARD OFFICER PROMOTION
+function PersonnelTab() {
+    const [email, setEmail] = useState('');
+    const [sending, setSending] = useState(false);
+    const [msg, setMsg] = useState('');
+    const [users, setUsers] = useState<any[]>([]);
+    const [loadingUsers, setLoadingUsers] = useState(true);
+
+    const fetchUsers = async () => {
+        setLoadingUsers(true);
+        try {
+            const res = await fetch('/api/clerk/users');
+            if (res.ok) {
+                const data = await res.json();
+                setUsers(data);
+            }
+        } catch (err) {
+            console.error('Failed to fetch users');
+        } finally {
+            setLoadingUsers(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchUsers();
+    }, []);
+
+    const handleInvite = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setSending(true);
+        setMsg('');
+        try {
+            const res = await fetch('/api/clerk/invite', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, role: 'Ward Officer' }),
+            });
+            if (res.ok) {
+                setMsg('Invitation sent successfully!');
+                setEmail('');
+            } else {
+                setMsg('Failed to send invite.');
+            }
+        } catch (err) {
+            setMsg('Error sending invite.');
+        } finally {
+            setSending(false);
+        }
+    };
+
+    const handlePromote = async (userId: string, userEmail: string) => {
+        if (!confirm(`Are you sure you want to promote ${userEmail} to Ward Officer?`)) return;
+        try {
+            const res = await fetch('/api/clerk/users', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userId, role: 'Ward Officer' }),
+            });
+            if (res.ok) {
+                fetchUsers();
+            } else {
+                alert('Failed to promote user');
+            }
+        } catch (err) {
+            alert('Error promoting user');
+        }
+    };
+
+    const citizens = users.filter(u => u.role === 'Citizen');
+
+    return (
+        <div className="space-y-6">
+            <div className="p-5 rounded-xl bg-indigo-500/10 border border-indigo-500/20">
+                <h3 className="text-sm font-bold text-white mb-2 flex items-center gap-2">
+                    <Mail className="w-4 h-4 text-indigo-400" />
+                    Invite New Ward Officer
+                </h3>
+                <p className="text-[11px] text-slate-400 mb-4">
+                    Send an email invitation. The user will be automatically assigned the <strong>Ward Officer</strong> role upon signing up.
+                </p>
+                <form onSubmit={handleInvite} className="flex gap-3">
+                    <input
+                        type="email"
+                        required
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder="officer@delhi.gov.in"
+                        className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+                    />
+                    <button
+                        type="submit"
+                        disabled={sending}
+                        className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold rounded-lg transition-colors disabled:opacity-50"
+                    >
+                        {sending ? 'Sending...' : 'Invite'}
+                    </button>
+                </form>
+                {msg && <p className="text-xs mt-3 text-indigo-400 font-bold">{msg}</p>}
+            </div>
+
+            <div className="p-5 rounded-xl bg-white/[0.02] border border-white/10">
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                        <Users className="w-4 h-4 text-slate-400" />
+                        Eligible Citizens for Promotion
+                    </h3>
+                    <button onClick={fetchUsers} className="p-1.5 bg-white/5 hover:bg-white/10 rounded-md">
+                        <RefreshCw className={`w-3.5 h-3.5 text-slate-400 ${loadingUsers ? 'animate-spin' : ''}`} />
+                    </button>
+                </div>
+                
+                <div className="space-y-2 max-h-64 overflow-y-auto custom-scrollbar pr-2">
+                    {loadingUsers ? (
+                        <div className="text-xs text-slate-500 text-center py-4">Loading users...</div>
+                    ) : citizens.length === 0 ? (
+                        <div className="text-xs text-slate-500 text-center py-4 border border-dashed border-white/10 rounded-lg">
+                            No eligible citizens found.
+                        </div>
+                    ) : (
+                        citizens.map(u => (
+                            <div key={u.id} className="flex items-center justify-between p-3 bg-slate-800/50 rounded-lg border border-white/5 hover:border-white/10 transition-colors">
+                                <div>
+                                    <div className="text-sm font-bold text-white">{u.email}</div>
+                                    <div className="text-[10px] text-emerald-400 uppercase tracking-widest mt-0.5">Current: {u.role}</div>
+                                </div>
+                                <button
+                                    onClick={() => handlePromote(u.id, u.email)}
+                                    className="px-4 py-1.5 bg-blue-500/20 hover:bg-blue-500/40 text-blue-400 text-xs font-bold rounded-lg border border-blue-500/30 transition-colors"
+                                >
+                                    Promote
+                                </button>
+                            </div>
+                        ))
+                    )}
+                </div>
+            </div>
+        </div>
     );
 }
